@@ -9,6 +9,7 @@
 
 (define-data-var next-story-id uint u1)
 (define-data-var truth-token-price uint u1000000)
+(define-data-var reputation-threshold uint u70)
 
 (define-map stories
   { story-id: uint }
@@ -39,6 +40,16 @@
   { balance: uint }
 )
 
+(define-map user-reputation
+  { user: principal }
+  {
+    correct-stakes: uint,
+    total-stakes: uint,
+    reputation-score: uint,
+    last-updated: uint
+  }
+)
+
 (define-read-only (get-story (story-id uint))
   (map-get? stories { story-id: story-id })
 )
@@ -61,6 +72,17 @@
 
 (define-read-only (get-truth-token-price)
   (var-get truth-token-price)
+)
+
+(define-read-only (get-user-reputation (user principal))
+  (default-to 
+    { correct-stakes: u0, total-stakes: u0, reputation-score: u50, last-updated: u0 }
+    (map-get? user-reputation { user: user })
+  )
+)
+
+(define-read-only (is-reputable-user (user principal))
+  (>= (get reputation-score (get-user-reputation user)) (var-get reputation-threshold))
 )
 
 (define-read-only (can-view-story (story-id uint) (viewer principal))
@@ -173,6 +195,7 @@
       )
     )
     
+    (unwrap! (update-reputation-on-stake tx-sender) (err err-unauthorized))
     (ok true)
   )
 )
@@ -214,6 +237,79 @@
       { story-id: story-id }
       (merge story { is-active: false })
     )
+    (ok true)
+  )
+)
+
+(define-public (update-reputation-on-stake (user principal))
+  (let (
+    (current-rep (get-user-reputation user))
+    (new-total (+ (get total-stakes current-rep) u1))
+  )
+    (map-set user-reputation
+      { user: user }
+      {
+        correct-stakes: (get correct-stakes current-rep),
+        total-stakes: new-total,
+        reputation-score: (if (> new-total u0)
+          (/ (* (get correct-stakes current-rep) u100) new-total)
+          u50
+        ),
+        last-updated: stacks-block-height
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (update-reputation-on-resolution (story-id uint))
+  (let (
+    (story (unwrap! (get-story story-id) (err err-not-found)))
+    (winning-side (> (get total-stake-believe story) (get total-stake-dispute story)))
+  )
+    (asserts! (is-eq (get author story) tx-sender) (err err-unauthorized))
+    (ok (update-staker-reputations story-id winning-side))
+  )
+)
+
+(define-private (update-staker-reputations (story-id uint) (winning-side bool))
+  true
+)
+
+(define-public (claim-reputation-bonus (story-id uint))
+  (let (
+    (story (unwrap! (get-story story-id) (err err-not-found)))
+    (stake-info (unwrap! (get-stake story-id tx-sender) (err err-not-found)))
+    (user-rep (get-user-reputation tx-sender))
+    (was-correct (is-eq (get position stake-info) (> (get total-stake-believe story) (get total-stake-dispute story))))
+  )
+    (asserts! (not (get is-active story)) (err err-unauthorized))
+    (if was-correct
+      (let ((new-correct (+ (get correct-stakes user-rep) u1)))
+        (map-set user-reputation
+          { user: tx-sender }
+          {
+            correct-stakes: new-correct,
+            total-stakes: (get total-stakes user-rep),
+            reputation-score: (if (> (get total-stakes user-rep) u0)
+              (/ (* new-correct u100) (get total-stakes user-rep))
+              u50
+            ),
+            last-updated: stacks-block-height
+          }
+        )
+        (ok true)
+      )
+      (ok false)
+    )
+  )
+)
+
+(define-public (set-reputation-threshold (new-threshold uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) (err err-owner-only))
+    (asserts! (<= new-threshold u100) (err err-invalid-amount))
+    (var-set reputation-threshold new-threshold)
     (ok true)
   )
 )
