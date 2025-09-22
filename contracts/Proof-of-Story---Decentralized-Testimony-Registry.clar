@@ -10,6 +10,7 @@
 (define-data-var next-story-id uint u1)
 (define-data-var truth-token-price uint u1000000)
 (define-data-var reputation-threshold uint u70)
+(define-constant referral-reward u10)
 
 (define-map stories
   { story-id: uint }
@@ -49,6 +50,9 @@
     last-updated: uint
   }
 )
+
+(define-map referrals { referee: principal } { referrer: principal, rewarded: bool })
+(define-map user-first-stake { user: principal } { has-staked: bool })
 
 (define-read-only (get-story (story-id uint))
   (map-get? stories { story-id: story-id })
@@ -173,7 +177,23 @@
     (asserts! (>= current-balance amount) (err err-insufficient-funds))
     (asserts! (> amount u0) (err err-invalid-amount))
     (asserts! (is-none existing-stake) (err err-already-voted))
-    
+
+    (if (is-none (map-get? user-first-stake { user: tx-sender }))
+      (begin
+        (map-set user-first-stake { user: tx-sender } { has-staked: true })
+        (let ((referral-opt (map-get? referrals { referee: tx-sender })))
+          (if (and (is-some referral-opt) (not (get rewarded (unwrap-panic referral-opt))))
+            (let ((referrer (get referrer (unwrap-panic referral-opt))))
+              (map-set user-balances { user: referrer } { balance: (+ (get-user-balance referrer) referral-reward) })
+              (map-set referrals { referee: tx-sender } (merge (unwrap-panic referral-opt) { rewarded: true }))
+            )
+            true
+          )
+        )
+      )
+      true
+    )
+
     (map-set user-balances
       { user: tx-sender }
       { balance: (- current-balance amount) }
@@ -302,6 +322,14 @@
       )
       (ok false)
     )
+  )
+)
+
+(define-public (set-referral (referee principal))
+  (begin
+    (asserts! (is-none (map-get? referrals { referee: referee })) (err err-already-exists))
+    (map-set referrals { referee: referee } { referrer: tx-sender, rewarded: false })
+    (ok true)
   )
 )
 
