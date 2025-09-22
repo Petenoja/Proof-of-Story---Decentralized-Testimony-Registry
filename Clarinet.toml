@@ -1,0 +1,23 @@
+[project]
+name = 'Proof-of-Story---Decentralized-Testimony-Registry'
+description = ''
+authors = []
+telemetry = true
+cache_dir = '.\.cache'
+requirements = []
+[contracts.Proof-of-Story---Decentralized-Testimony-Registry]
+path = 'contracts/Proof-of-Story---Decentralized-Testimony-Registry.clar'
+clarity_version = 3
+epoch = 3.1
+[repl.analysis]
+passes = ['check_checker']
+
+[repl.analysis.check_checker]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
+
+[repl.remote_data]
+enabled = false
+api_url = 'https://api.hiro.so'
