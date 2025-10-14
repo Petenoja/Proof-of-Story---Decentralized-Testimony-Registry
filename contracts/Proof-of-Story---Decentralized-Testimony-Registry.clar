@@ -22,7 +22,8 @@
     access-price: uint,
     total-stake-believe: uint,
     total-stake-dispute: uint,
-    is-active: bool
+    is-active: bool,
+    endorsements-count: uint
   }
 )
 
@@ -53,6 +54,11 @@
 
 (define-map referrals { referee: principal } { referrer: principal, rewarded: bool })
 (define-map user-first-stake { user: principal } { has-staked: bool })
+
+(define-map story-endorsements
+  { story-id: uint, endorser: principal }
+  { endorsed: bool, endorsed-at: uint }
+)
 
 (define-read-only (get-story (story-id uint))
   (map-get? stories { story-id: story-id })
@@ -109,7 +115,8 @@
       credibility-score: (if (> (+ (get total-stake-believe story) (get total-stake-dispute story)) u0)
         (/ (* (get total-stake-believe story) u100) (+ (get total-stake-believe story) (get total-stake-dispute story)))
         u50
-      )
+      ),
+      endorsements-count: (get endorsements-count story)
     })
   )
 )
@@ -127,7 +134,8 @@
         access-price: access-price,
         total-stake-believe: u0,
         total-stake-dispute: u0,
-        is-active: true
+        is-active: true,
+        endorsements-count: u0
       }
     )
     (var-set next-story-id (+ story-id u1))
@@ -346,6 +354,27 @@
   (begin
     (asserts! (is-eq tx-sender contract-owner) (err err-owner-only))
     (var-set truth-token-price new-price)
+    (ok true)
+  )
+)
+
+(define-public (endorse-story (story-id uint))
+  (let (
+    (story (unwrap! (get-story story-id) (err err-not-found)))
+    (existing-endorsement (map-get? story-endorsements { story-id: story-id, endorser: tx-sender }))
+  )
+    (asserts! (get is-active story) (err err-unauthorized))
+    (asserts! (not (is-eq (get author story) tx-sender)) (err err-unauthorized))
+    (asserts! (is-reputable-user tx-sender) (err err-unauthorized))
+    (asserts! (is-none existing-endorsement) (err err-already-exists))
+    (map-set story-endorsements
+      { story-id: story-id, endorser: tx-sender }
+      { endorsed: true, endorsed-at: stacks-block-height }
+    )
+    (map-set stories
+      { story-id: story-id }
+      (merge story { endorsements-count: (+ (get endorsements-count story) u1) })
+    )
     (ok true)
   )
 )
